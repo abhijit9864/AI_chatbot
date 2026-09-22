@@ -1,6 +1,11 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  useRef,
+  useState,
+} from "react";
 import { ArrowUp } from "lucide-react";
 
 interface ChatInputProps {
@@ -13,10 +18,47 @@ export default function ChatInput({
   disabled = false,
 }: ChatInputProps) {
   const [content, setContent] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
+  const autoResize = () => {
+    const textarea = textareaRef.current;
 
+    if (!textarea) return;
+
+    // Reset height first so it can shrink as well
+    textarea.style.height = "24px";
+
+    // Calculate required height
+    const newHeight = Math.min(textarea.scrollHeight, 160);
+
+    textarea.style.height = `${newHeight}px`;
+
+    // Only show scrollbar after maximum height
+    textarea.style.overflowY =
+      textarea.scrollHeight > 160 ? "auto" : "hidden";
+  };
+
+  const handleChange = (
+    event: React.ChangeEvent<HTMLTextAreaElement>
+  ) => {
+    setContent(event.target.value);
+
+    // Run after React updates the textarea value
+    requestAnimationFrame(autoResize);
+  };
+
+  const resetTextarea = () => {
+    setContent("");
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "24px";
+        textareaRef.current.style.overflowY = "hidden";
+      }
+    });
+  };
+
+  const sendMessage = () => {
     const trimmedContent = content.trim();
 
     if (!trimmedContent || disabled) {
@@ -24,21 +66,20 @@ export default function ChatInput({
     }
 
     onSend(trimmedContent);
-    setContent("");
+    resetTextarea();
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    sendMessage();
+  };
+
+  const handleKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-
-      const trimmedContent = content.trim();
-
-      if (!trimmedContent || disabled) {
-        return;
-      }
-
-      onSend(trimmedContent);
-      setContent("");
+      sendMessage();
     }
   };
 
@@ -50,13 +91,18 @@ export default function ChatInput({
       >
         <div className="flex-1 rounded-2xl border border-gray-300 bg-white px-4 py-3 shadow-sm focus-within:border-gray-500">
           <textarea
+            ref={textareaRef}
             value={content}
-            onChange={(event) => setContent(event.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Message AI..."
             disabled={disabled}
             rows={1}
-            className="max-h-40 min-h-6 w-full resize-none bg-transparent text-sm text-gray-900 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            className="block w-full resize-none overflow-hidden bg-transparent text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              height: "24px",
+              maxHeight: "160px",
+            }}
           />
 
           <div className="mt-2 text-xs text-gray-400">
