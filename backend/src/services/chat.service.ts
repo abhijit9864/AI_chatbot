@@ -1,5 +1,6 @@
 import { prisma } from "../config/prisma";
 import { generateAIResponse } from "./ai.service";
+import { streamAIResponse } from "./ai.service";
 
 export async function createChat(userId: string) {
   return prisma.chat.create({
@@ -94,48 +95,6 @@ export async function deleteChat(
   });
 }
 
-// export async function createMessage(
-//   userId: string,
-//   chatId: string,
-//   content: string
-// ) {
-//   const trimmedContent = content.trim();
-
-//   if (!trimmedContent) {
-//     throw new Error("Message content is required");
-//   }
-
-//   const chat = await prisma.chat.findFirst({
-//     where: {
-//       id: chatId,
-//       userId,
-//     },
-//   });
-
-//   if (!chat) {
-//     throw new Error("Chat not found");
-//   }
-
-//   const message = await prisma.message.create({
-//     data: {
-//       chatId,
-//       role: "USER",
-//       content: trimmedContent,
-//     },
-//   });
-
-//   await prisma.chat.update({
-//     where: {
-//       id: chatId,
-//     },
-//     data: {
-//       updatedAt: new Date(),
-//     },
-//   });
-
-//   return message;
-// }
-
 export async function createMessage(
   userId: string,
   chatId: string,
@@ -189,6 +148,87 @@ export async function createMessage(
   );
 
   // Save assistant response
+  const assistantMessage =
+    await prisma.message.create({
+      data: {
+        chatId,
+        role: "ASSISTANT",
+        content: aiResponse.content,
+        model: aiResponse.model,
+      },
+    });
+
+  // Update chat timestamp
+  await prisma.chat.update({
+    where: {
+      id: chatId,
+    },
+    data: {
+      updatedAt: new Date(),
+    },
+  });
+
+  return {
+    userMessage,
+    assistantMessage,
+  };
+}
+
+export async function streamMessage(
+  userId: string,
+  chatId: string,
+  content: string,
+  onChunk: (chunk: string) => void
+) {
+  const trimmedContent = content.trim();
+
+  if (!trimmedContent) {
+    throw new Error("Message content is required");
+  }
+
+  // Check chat ownership
+  const chat = await prisma.chat.findFirst({
+    where: {
+      id: chatId,
+      userId,
+    },
+  });
+
+  if (!chat) {
+    throw new Error("Chat not found");
+  }
+
+  // Save user message
+  const userMessage = await prisma.message.create({
+    data: {
+      chatId,
+      role: "USER",
+      content: trimmedContent,
+    },
+  });
+
+  // Get complete conversation history
+  const conversationMessages =
+    await prisma.message.findMany({
+      where: {
+        chatId,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        role: true,
+        content: true,
+      },
+    });
+
+  // Stream AI response
+  const aiResponse = await streamAIResponse(
+    conversationMessages,
+    onChunk
+  );
+
+  // Save complete AI response after streaming finishes
   const assistantMessage =
     await prisma.message.create({
       data: {

@@ -4,7 +4,12 @@ import { Message } from "@/types/chat";
 import { User } from "@/types/user";
 import { useEffect, useState } from "react";
 
-import { createChat, renameChat, sendMessage } from "@/lib/chat";
+import {
+  createChat,
+  renameChat,
+  sendMessageStream,
+} from "@/lib/chat";
+
 import { useChatContext } from "./chat-provider";
 import MessageList from "./message-list";
 import ChatInput from "./chat-input";
@@ -12,6 +17,7 @@ import Swal from "sweetalert2";
 
 export default function ChatWindow() {
   const [user, setUser] = useState<User | null>(null);
+
   const {
     messages,
     setMessages,
@@ -22,8 +28,14 @@ export default function ChatWindow() {
     setSending,
   } = useChatContext();
 
+  /*
+   * -----------------------------------------
+   * LOAD USER
+   * -----------------------------------------
+   */
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
+    const storedUser =
+      localStorage.getItem("user");
 
     if (!storedUser) {
       setUser(null);
@@ -31,16 +43,31 @@ export default function ChatWindow() {
     }
 
     try {
-      const parsedUser: User = JSON.parse(storedUser);
+      const parsedUser: User =
+        JSON.parse(storedUser);
+
       setUser(parsedUser);
     } catch (error) {
-      console.error("Failed to parse stored user:", error);
+      console.error(
+        "Failed to parse stored user:",
+        error
+      );
+
       setUser(null);
     }
   }, []);
 
-  const generateChatTitle = (content: string) => {
-    const cleanedContent = content.trim().replace(/\s+/g, " ");
+  /*
+   * -----------------------------------------
+   * GENERATE CHAT TITLE
+   * -----------------------------------------
+   */
+  const generateChatTitle = (
+    content: string
+  ) => {
+    const cleanedContent = content
+      .trim()
+      .replace(/\s+/g, " ");
 
     if (!cleanedContent) {
       return "New Chat";
@@ -52,20 +79,26 @@ export default function ChatWindow() {
       return cleanedContent;
     }
 
-    return `${cleanedContent.slice(0, maxLength)}...`;
+    return `${cleanedContent.slice(
+      0,
+      maxLength
+    )}...`;
   };
 
-  const handleSend = async (content: string) => {
-    /*
-     * -----------------------------------------
-     * AUTHENTICATION CHECK
-     * -----------------------------------------
-     *
-     * Do not call the backend if the user
-     * is not logged in.
-     */
-    const token = localStorage.getItem("token");
+  /*
+   * -----------------------------------------
+   * SEND MESSAGE
+   * -----------------------------------------
+   */
+  const handleSend = async (
+    content: string
+  ) => {
+    const token =
+      localStorage.getItem("token");
 
+    /*
+     * Authentication check
+     */
     if (!token) {
       await Swal.fire({
         icon: "info",
@@ -79,8 +112,7 @@ export default function ChatWindow() {
     }
 
     /*
-     * Prevent multiple messages while AI
-     * is generating a response.
+     * Prevent multiple requests
      */
     if (sending) {
       return;
@@ -88,38 +120,39 @@ export default function ChatWindow() {
 
     let activeChat = currentChat;
 
-    /*
-     * Keep temporary message ID outside the
-     * try block so both success and error
-     * handlers can access it.
-     */
-    let temporaryMessageId: string | null = null;
+    let temporaryMessageId:
+      | string
+      | null = null;
+
+    let streamingMessageId:
+      | string
+      | null = null;
 
     try {
       setSending(true);
 
       /*
        * -----------------------------------------
-       * NEW CHAT
+       * CREATE NEW CHAT
        * -----------------------------------------
-       *
-       * If there is no current chat, create
-       * the database chat only when the user
-       * actually sends the first message.
        */
       if (!activeChat) {
-        const result = await createChat();
+        const result =
+          await createChat();
 
         activeChat = result.chat;
 
         setCurrentChat(activeChat);
 
-        setChats((previous) => [activeChat!, ...previous]);
+        setChats((previous) => [
+          activeChat!,
+          ...previous,
+        ]);
 
-        /*
-         * Remember this chat for this browser tab.
-         */
-        sessionStorage.setItem("currentChatId", activeChat.id);
+        sessionStorage.setItem(
+          "currentChatId",
+          activeChat.id
+        );
       }
 
       /*
@@ -127,147 +160,263 @@ export default function ChatWindow() {
        * FIRST MESSAGE
        * -----------------------------------------
        */
-      const isFirstMessage = messages.length === 0;
+      const isFirstMessage =
+        messages.length === 0;
 
       /*
        * -----------------------------------------
-       * TEMPORARY USER MESSAGE
+       * CREATE TEMPORARY MESSAGE IDS
        * -----------------------------------------
        */
-      temporaryMessageId = crypto.randomUUID();
+      temporaryMessageId =
+        crypto.randomUUID();
 
-      const temporaryUserMessage: Message = {
+      streamingMessageId =
+        crypto.randomUUID();
+
+      /*
+       * -----------------------------------------
+       * CREATE TEMPORARY USER MESSAGE
+       * -----------------------------------------
+       */
+      const temporaryUserMessage:
+        Message = {
         id: temporaryMessageId,
         chatId: activeChat.id,
         role: "USER",
         content,
-        createdAt: new Date().toISOString(),
+        createdAt:
+          new Date().toISOString(),
       };
 
       /*
-       * Show the user's message immediately.
+       * -----------------------------------------
+       * CREATE STREAMING ASSISTANT MESSAGE
+       * -----------------------------------------
        */
-      setMessages((previous) => [...previous, temporaryUserMessage]);
+      const streamingAssistantMessage:
+        Message = {
+        id: streamingMessageId,
+        chatId: activeChat.id,
+        role: "ASSISTANT",
+        content: "",
+        createdAt:
+          new Date().toISOString(),
+      };
+
+      /*
+       * Add BOTH temporary messages
+       * in ONE state update.
+       */
+      setMessages((previous) => [
+        ...previous,
+        temporaryUserMessage,
+        streamingAssistantMessage,
+      ]);
 
       /*
        * -----------------------------------------
-       * START RESPONSE TIMER
+       * RESPONSE TIMER
        * -----------------------------------------
        */
-      const startTime = performance.now();
+      const startTime =
+        performance.now();
 
       /*
        * -----------------------------------------
        * CHAT TITLE
        * -----------------------------------------
-       *
-       * Generate title from the first message.
        */
       if (isFirstMessage) {
-        const newTitle = generateChatTitle(content);
+        const newTitle =
+          generateChatTitle(content);
 
         try {
-          const renameResult = await renameChat(activeChat.id, newTitle);
+          const renameResult =
+            await renameChat(
+              activeChat.id,
+              newTitle
+            );
 
-          const updatedChat = renameResult.chat;
+          const updatedChat =
+            renameResult.chat;
 
-          activeChat = updatedChat;
+          activeChat =
+            updatedChat;
 
-          setCurrentChat(updatedChat);
+          setCurrentChat(
+            updatedChat
+          );
 
           setChats((previous) =>
             previous.map((chat) =>
-              chat.id === updatedChat.id ? updatedChat : chat,
-            ),
+              chat.id ===
+              updatedChat.id
+                ? updatedChat
+                : chat
+            )
           );
         } catch (error) {
-          /*
-           * Title failure should not stop
-           * the actual message from being sent.
-           */
-          console.error("Failed to generate chat title:", error);
+          console.error(
+            "Failed to generate chat title:",
+            error
+          );
         }
       }
 
       /*
        * -----------------------------------------
-       * SEND MESSAGE TO BACKEND
+       * STREAM AI RESPONSE
        * -----------------------------------------
        */
-      const result = await sendMessage(activeChat.id, content);
+      const result =
+        await sendMessageStream(
+          activeChat.id,
+          content,
+          (chunk) => {
+            setMessages((previous) =>
+              previous.map(
+                (message) => {
+                  if (
+                    message.id !==
+                    streamingMessageId
+                  ) {
+                    return message;
+                  }
+
+                  return {
+                    ...message,
+                    content:
+                      message.content +
+                      chunk,
+                  };
+                }
+              )
+            );
+          }
+        );
 
       /*
        * -----------------------------------------
        * RESPONSE TIME
        * -----------------------------------------
        */
-      const responseTimeMs = performance.now() - startTime;
+      const responseTimeMs =
+        performance.now() -
+        startTime;
 
-      const { userMessage, assistantMessage } = result.message;
-
-      const assistantMessageWithTiming: Message = {
-        ...assistantMessage,
+      const assistantMessageWithTiming:
+        Message = {
+        ...result.assistantMessage,
         responseTimeMs,
       };
 
       /*
        * -----------------------------------------
-       * REPLACE TEMPORARY MESSAGE
+       * REPLACE TEMPORARY MESSAGES
        * -----------------------------------------
        */
       setMessages((previous) => {
-        const temporaryIndex = previous.findIndex(
-          (message) => message.id === temporaryMessageId,
-        );
+        const cleanedMessages =
+          previous.filter(
+            (message) =>
+              message.id !==
+                temporaryMessageId &&
+              message.id !==
+                streamingMessageId
+          );
 
-        /*
-         * Safety fallback.
-         */
-        if (temporaryIndex === -1) {
-          return [...previous, userMessage, assistantMessageWithTiming];
-        }
-
-        const updated = [...previous];
-
-        updated.splice(
-          temporaryIndex,
-          1,
-          userMessage,
+        return [
+          ...cleanedMessages,
+          result.userMessage,
           assistantMessageWithTiming,
-        );
-
-        return updated;
+        ];
       });
     } catch (error) {
-      console.error("Failed to send message:", error);
+      console.error(
+        "Failed to send message:",
+        error
+      );
 
       /*
-       * Remove only the temporary message
-       * if the request failed.
+       * -----------------------------------------
+       * REMOVE TEMPORARY MESSAGES
+       * -----------------------------------------
        */
-      if (temporaryMessageId) {
-        setMessages((previous) =>
-          previous.filter((message) => message.id !== temporaryMessageId),
-        );
-      }
+      setMessages((previous) =>
+        previous.filter(
+          (message) =>
+            message.id !==
+              temporaryMessageId &&
+            message.id !==
+              streamingMessageId
+        )
+      );
+
+      await Swal.fire({
+        icon: "error",
+        title: "Something went wrong",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to generate AI response.",
+        confirmButtonColor:
+          "#111827",
+      });
     } finally {
       setSending(false);
     }
   };
-  const handleCopy = async (content: string) => {
-    await navigator.clipboard.writeText(content);
+
+  /*
+   * -----------------------------------------
+   * COPY MESSAGE
+   * -----------------------------------------
+   */
+  const handleCopy = async (
+    content: string
+  ) => {
+    await navigator.clipboard.writeText(
+      content
+    );
   };
 
-  const handleEdit = (message: Message) => {
-    console.log("Edit message:", message);
+  /*
+   * -----------------------------------------
+   * EDIT MESSAGE
+   * -----------------------------------------
+   */
+  const handleEdit = (
+    message: Message
+  ) => {
+    console.log(
+      "Edit message:",
+      message
+    );
   };
 
-  const handleRegenerate = (message: Message) => {
-    console.log("Regenerate message:", message);
+  /*
+   * -----------------------------------------
+   * REGENERATE RESPONSE
+   * -----------------------------------------
+   */
+  const handleRegenerate = (
+    message: Message
+  ) => {
+    console.log(
+      "Regenerate message:",
+      message
+    );
   };
 
-  const hasMessages = messages.length > 0;
+  const hasMessages =
+    messages.length > 0;
 
+  /*
+   * -----------------------------------------
+   * UI
+   * -----------------------------------------
+   */
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {!hasMessages ? (
@@ -275,7 +424,8 @@ export default function ChatWindow() {
           <div className="w-full max-w-3xl">
             <div className="mb-8 text-center">
               <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
-                Hello, {user?.name || "there"} 👋
+                Hello,{" "}
+                {user?.name || "there"} 👋
               </h1>
 
               <p className="mt-3 text-base text-gray-500">
@@ -283,7 +433,10 @@ export default function ChatWindow() {
               </p>
             </div>
 
-            <ChatInput onSend={handleSend} disabled={sending} />
+            <ChatInput
+              onSend={handleSend}
+              disabled={sending}
+            />
           </div>
         </div>
       ) : (
@@ -293,10 +446,15 @@ export default function ChatWindow() {
             isTyping={sending}
             onCopy={handleCopy}
             onEdit={handleEdit}
-            onRegenerate={handleRegenerate}
+            onRegenerate={
+              handleRegenerate
+            }
           />
 
-          <ChatInput onSend={handleSend} disabled={sending} />
+          <ChatInput
+            onSend={handleSend}
+            disabled={sending}
+          />
         </>
       )}
     </div>

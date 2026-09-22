@@ -7,6 +7,7 @@ import {
   renameChat,
   deleteChat,
   createMessage,
+  streamMessage,
   getChatMessages,
 } from "../services/chat.service";
 
@@ -190,30 +191,98 @@ export async function createMessageController(
     const chatId = String(req.params.chatId);
     const { content } = req.body;
 
-    const message = await createMessage(
-      req.user.userId,
-      chatId,
-      content
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        message: "Message content is required",
+      });
+    }
+
+    // Configure Server-Sent Events
+    res.setHeader(
+      "Content-Type",
+      "text/event-stream"
     );
 
-    return res.status(201).json({
-      message,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to create message";
+    res.setHeader(
+      "Cache-Control",
+      "no-cache"
+    );
 
-    if (message === "Chat not found") {
-      return res.status(404).json({
+    res.setHeader(
+      "Connection",
+      "keep-alive"
+    );
+
+    res.flushHeaders();
+
+    // Tell frontend streaming has started
+    res.write(
+      `data: ${JSON.stringify({
+        type: "start",
+      })}\n\n`
+    );
+
+    // Stream Qwen3 response
+    const result = await streamMessage(
+      req.user.userId,
+      chatId,
+      content,
+      (chunk) => {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "chunk",
+            content: chunk,
+          })}\n\n`
+        );
+      }
+    );
+
+    // Send final saved messages
+    res.write(
+      `data: ${JSON.stringify({
+        type: "done",
+        userMessage: result.userMessage,
+        assistantMessage: result.assistantMessage,
+      })}\n\n`
+    );
+
+    res.end();
+  } catch (error) {
+    console.error(
+      "Create message streaming error:",
+      error
+    );
+
+    if (!res.headersSent) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to create message";
+
+      if (message === "Chat not found") {
+        return res.status(404).json({
+          message,
+        });
+      }
+
+      return res.status(500).json({
         message,
       });
     }
 
-    return res.status(400).json({
-      message,
-    });
+    // If streaming has already started,
+    // send an SSE error event.
+    res.write(
+      `data: ${JSON.stringify({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to create message",
+      })}\n\n`
+    );
+
+    res.end();
   }
 }
 

@@ -5,15 +5,19 @@ interface ConversationMessage {
   content: string;
 }
 
-interface OllamaResponse {
+interface OllamaStreamChunk {
   model: string;
   response: string;
   done: boolean;
 }
 
-export async function generateAIResponse(
-  messages: ConversationMessage[]
-): Promise<{ content: string; model: string }> {
+export async function streamAIResponse(
+  messages: ConversationMessage[],
+  onChunk: (chunk: string) => void
+): Promise<{
+  content: string;
+  model: string;
+}> {
   const conversation = messages
     .map((message) => {
       const role =
@@ -42,7 +46,7 @@ Assistant:`;
       body: JSON.stringify({
         model: "qwen3:4b",
         prompt,
-        stream: false,
+        stream: true,
       }),
     }
   );
@@ -53,11 +57,57 @@ Assistant:`;
     );
   }
 
-  const data =
-    (await response.json()) as OllamaResponse;
+  if (!response.body) {
+    throw new Error("Ollama response body is empty");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let fullContent = "";
+  let model = "qwen3:4b";
+
+  while (true) {
+    const { value, done } =
+      await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    const text = decoder.decode(value, {
+      stream: true,
+    });
+
+    const lines = text
+      .split("\n")
+      .filter(Boolean);
+
+    for (const line of lines) {
+      try {
+        const data =
+          JSON.parse(line) as OllamaStreamChunk;
+
+        if (data.response) {
+          fullContent += data.response;
+
+          onChunk(data.response);
+        }
+
+        if (data.model) {
+          model = data.model;
+        }
+      } catch (error) {
+        console.error(
+          "Failed to parse Ollama stream chunk:",
+          error
+        );
+      }
+    }
+  }
 
   return {
-    content: data.response,
-    model: data.model,
+    content: fullContent,
+    model,
   };
 }
