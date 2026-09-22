@@ -147,6 +147,7 @@ export async function createMessage(
     throw new Error("Message content is required");
   }
 
+  // Check chat ownership
   const chat = await prisma.chat.findFirst({
     where: {
       id: chatId,
@@ -167,30 +168,38 @@ export async function createMessage(
     },
   });
 
-  await prisma.chat.update({
-    where: {
-      id: chatId,
-    },
-    data: {
-      updatedAt: new Date(),
-    },
-  });
+  // Get complete conversation history
+  const conversationMessages =
+    await prisma.message.findMany({
+      where: {
+        chatId,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        role: true,
+        content: true,
+      },
+    });
 
-  // Generate AI response
+  // Send conversation history to AI
   const aiResponse = await generateAIResponse(
-    trimmedContent
+    conversationMessages
   );
 
-  // Save assistant message
-  const assistantMessage = await prisma.message.create({
-    data: {
-      chatId,
-      role: "ASSISTANT",
-      content: aiResponse.content,
-      model: aiResponse.model,
-    },
-  });
+  // Save assistant response
+  const assistantMessage =
+    await prisma.message.create({
+      data: {
+        chatId,
+        role: "ASSISTANT",
+        content: aiResponse.content,
+        model: aiResponse.model,
+      },
+    });
 
+  // Update chat timestamp
   await prisma.chat.update({
     where: {
       id: chatId,
