@@ -14,6 +14,7 @@ interface OllamaStreamChunk {
 export async function streamAIResponse(
   messages: ConversationMessage[],
   onChunk: (chunk: string) => void,
+  signal?: AbortSignal
 ): Promise<{
   content: string;
   model: string;
@@ -63,6 +64,7 @@ Assistant:`;
       headers: {
         "Content-Type": "application/json",
       },
+      signal,
       body: JSON.stringify({
         model: "qwen3:4b-instruct",
         prompt,

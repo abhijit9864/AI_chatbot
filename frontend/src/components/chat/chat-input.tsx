@@ -10,11 +10,13 @@ import { ArrowUp } from "lucide-react";
 
 interface ChatInputProps {
   onSend: (content: string) => void;
+  onStop?: () => void;
   disabled?: boolean;
 }
 
 export default function ChatInput({
   onSend,
+  onStop,
   disabled = false,
 }: ChatInputProps) {
   const [content, setContent] = useState("");
@@ -111,13 +113,18 @@ export default function ChatInput({
         </div>
 
         <button
-          type="submit"
-          disabled={disabled || !content.trim()}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
-          title="Send message"
-        >
-          <ArrowUp size={18} />
-        </button>
+  type={disabled ? "button" : "submit"}
+  onClick={disabled ? onStop : undefined}
+  disabled={!disabled && !content.trim()}
+  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+  title={disabled ? "Stop generating" : "Send message"}
+>
+  {disabled ? (
+    <div className="h-4 w-4 rounded-sm bg-white" />
+  ) : (
+    <ArrowUp size={18} />
+  )}
+</button>
       </form>
     </div>
   );

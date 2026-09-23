@@ -178,7 +178,8 @@ export async function streamMessage(
   userId: string,
   chatId: string,
   content: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal,
 ) {
   const trimmedContent = content.trim();
 
@@ -225,7 +226,8 @@ export async function streamMessage(
   // Stream AI response
   const aiResponse = await streamAIResponse(
     conversationMessages,
-    onChunk
+    onChunk,
+    signal
   );
 
   // Save complete AI response after streaming finishes

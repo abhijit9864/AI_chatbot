@@ -2,7 +2,7 @@
 
 import { Message } from "@/types/chat";
 import { User } from "@/types/user";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   createChat,
@@ -17,6 +17,27 @@ import Swal from "sweetalert2";
 
 export default function ChatWindow() {
   const [user, setUser] = useState<User | null>(null);
+
+  /*
+   * -----------------------------------------
+   * STREAM / ABORT REFS
+   * -----------------------------------------
+   */
+
+  const abortControllerRef =
+    useRef<AbortController | null>(null);
+
+  const streamingMessageIdRef =
+    useRef<string | null>(null);
+
+  const streamingContentRef =
+    useRef<string>("");
+
+  /*
+   * -----------------------------------------
+   * CHAT CONTEXT
+   * -----------------------------------------
+   */
 
   const {
     messages,
@@ -33,6 +54,7 @@ export default function ChatWindow() {
    * LOAD USER
    * -----------------------------------------
    */
+
   useEffect(() => {
     const storedUser =
       localStorage.getItem("user");
@@ -50,7 +72,7 @@ export default function ChatWindow() {
     } catch (error) {
       console.error(
         "Failed to parse stored user:",
-        error
+        error,
       );
 
       setUser(null);
@@ -62,12 +84,12 @@ export default function ChatWindow() {
    * GENERATE CHAT TITLE
    * -----------------------------------------
    */
+
   const generateChatTitle = (
-    content: string
+    content: string,
   ) => {
-    const cleanedContent = content
-      .trim()
-      .replace(/\s+/g, " ");
+    const cleanedContent =
+      content.trim().replace(/\s+/g, " ");
 
     if (!cleanedContent) {
       return "New Chat";
@@ -75,14 +97,67 @@ export default function ChatWindow() {
 
     const maxLength = 45;
 
-    if (cleanedContent.length <= maxLength) {
+    if (
+      cleanedContent.length <=
+      maxLength
+    ) {
       return cleanedContent;
     }
 
     return `${cleanedContent.slice(
       0,
-      maxLength
+      maxLength,
     )}...`;
+  };
+
+  /*
+   * -----------------------------------------
+   * STOP GENERATION
+   * -----------------------------------------
+   */
+
+  const handleStop = () => {
+    const messageId =
+      streamingMessageIdRef.current;
+
+    /*
+     * VERY IMPORTANT:
+     *
+     * Capture the current content BEFORE
+     * aborting the request and BEFORE React
+     * gets another render.
+     */
+    const currentContent =
+      streamingContentRef.current;
+
+    /*
+     * Immediately preserve the partial
+     * response in the UI.
+     */
+    if (messageId) {
+      setMessages((previous) =>
+        previous.map((message) => {
+          if (message.id !== messageId) {
+            return message;
+          }
+
+          return {
+            ...message,
+            content:
+              currentContent ||
+              message.content ||
+              "Generation stopped.",
+          };
+        }),
+      );
+    }
+
+    /*
+     * Now cancel the actual request.
+     */
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
   };
 
   /*
@@ -90,8 +165,9 @@ export default function ChatWindow() {
    * SEND MESSAGE
    * -----------------------------------------
    */
+
   const handleSend = async (
-    content: string
+    content: string,
   ) => {
     const token =
       localStorage.getItem("token");
@@ -99,6 +175,7 @@ export default function ChatWindow() {
     /*
      * Authentication check
      */
+
     if (!token) {
       await Swal.fire({
         icon: "info",
@@ -114,6 +191,7 @@ export default function ChatWindow() {
     /*
      * Prevent multiple requests
      */
+
     if (sending) {
       return;
     }
@@ -136,6 +214,7 @@ export default function ChatWindow() {
        * CREATE NEW CHAT
        * -----------------------------------------
        */
+
       if (!activeChat) {
         const result =
           await createChat();
@@ -151,7 +230,7 @@ export default function ChatWindow() {
 
         sessionStorage.setItem(
           "currentChatId",
-          activeChat.id
+          activeChat.id,
         );
       }
 
@@ -160,6 +239,7 @@ export default function ChatWindow() {
        * FIRST MESSAGE
        * -----------------------------------------
        */
+
       const isFirstMessage =
         messages.length === 0;
 
@@ -168,6 +248,7 @@ export default function ChatWindow() {
        * CREATE TEMPORARY MESSAGE IDS
        * -----------------------------------------
        */
+
       temporaryMessageId =
         crypto.randomUUID();
 
@@ -175,10 +256,25 @@ export default function ChatWindow() {
         crypto.randomUUID();
 
       /*
+       * Store streaming message ID
+       * outside React state.
+       */
+
+      streamingMessageIdRef.current =
+        streamingMessageId;
+
+      /*
+       * Reset previous streamed content.
+       */
+
+      streamingContentRef.current = "";
+
+      /*
        * -----------------------------------------
-       * CREATE TEMPORARY USER MESSAGE
+       * TEMPORARY USER MESSAGE
        * -----------------------------------------
        */
+
       const temporaryUserMessage:
         Message = {
         id: temporaryMessageId,
@@ -191,9 +287,10 @@ export default function ChatWindow() {
 
       /*
        * -----------------------------------------
-       * CREATE STREAMING ASSISTANT MESSAGE
+       * STREAMING ASSISTANT MESSAGE
        * -----------------------------------------
        */
+
       const streamingAssistantMessage:
         Message = {
         id: streamingMessageId,
@@ -205,9 +302,9 @@ export default function ChatWindow() {
       };
 
       /*
-       * Add BOTH temporary messages
-       * in ONE state update.
+       * Add temporary messages
        */
+
       setMessages((previous) => [
         ...previous,
         temporaryUserMessage,
@@ -219,14 +316,28 @@ export default function ChatWindow() {
        * RESPONSE TIMER
        * -----------------------------------------
        */
+
       const startTime =
         performance.now();
+
+      /*
+       * -----------------------------------------
+       * ABORT CONTROLLER
+       * -----------------------------------------
+       */
+
+      const controller =
+        new AbortController();
+
+      abortControllerRef.current =
+        controller;
 
       /*
        * -----------------------------------------
        * CHAT TITLE
        * -----------------------------------------
        */
+
       if (isFirstMessage) {
         const newTitle =
           generateChatTitle(content);
@@ -235,7 +346,7 @@ export default function ChatWindow() {
           const renameResult =
             await renameChat(
               activeChat.id,
-              newTitle
+              newTitle,
             );
 
           const updatedChat =
@@ -245,7 +356,7 @@ export default function ChatWindow() {
             updatedChat;
 
           setCurrentChat(
-            updatedChat
+            updatedChat,
           );
 
           setChats((previous) =>
@@ -253,13 +364,13 @@ export default function ChatWindow() {
               chat.id ===
               updatedChat.id
                 ? updatedChat
-                : chat
-            )
+                : chat,
+            ),
           );
         } catch (error) {
           console.error(
             "Failed to generate chat title:",
-            error
+            error,
           );
         }
       }
@@ -269,11 +380,25 @@ export default function ChatWindow() {
        * STREAM AI RESPONSE
        * -----------------------------------------
        */
+
       const result =
         await sendMessageStream(
           activeChat.id,
           content,
           (chunk) => {
+            /*
+             * Save every streamed chunk
+             * outside React state.
+             */
+            streamingContentRef.current +=
+              chunk;
+
+            const currentStreamingContent =
+              streamingContentRef.current;
+
+            /*
+             * Update UI.
+             */
             setMessages((previous) =>
               previous.map(
                 (message) => {
@@ -287,13 +412,13 @@ export default function ChatWindow() {
                   return {
                     ...message,
                     content:
-                      message.content +
-                      chunk,
+                      currentStreamingContent,
                   };
-                }
-              )
+                },
+              ),
             );
-          }
+          },
+          controller.signal,
         );
 
       /*
@@ -301,6 +426,7 @@ export default function ChatWindow() {
        * RESPONSE TIME
        * -----------------------------------------
        */
+
       const responseTimeMs =
         performance.now() -
         startTime;
@@ -316,6 +442,7 @@ export default function ChatWindow() {
        * REPLACE TEMPORARY MESSAGES
        * -----------------------------------------
        */
+
       setMessages((previous) => {
         const cleanedMessages =
           previous.filter(
@@ -323,7 +450,7 @@ export default function ChatWindow() {
               message.id !==
                 temporaryMessageId &&
               message.id !==
-                streamingMessageId
+                streamingMessageId,
           );
 
         return [
@@ -333,24 +460,84 @@ export default function ChatWindow() {
         ];
       });
     } catch (error) {
-      console.error(
-        "Failed to send message:",
-        error
-      );
+      /*
+       * -----------------------------------------
+       * HANDLE STOP
+       * -----------------------------------------
+       */
+
+      const isAbortError =
+        error instanceof Error &&
+        error.name === "AbortError";
+
+      if (isAbortError) {
+        /*
+         * Capture the content NOW.
+         *
+         * Do NOT read the ref inside the
+         * React updater because finally()
+         * will clear the ref.
+         */
+
+        const messageId =
+          streamingMessageIdRef.current;
+
+        const stoppedContent =
+          streamingContentRef.current;
+
+        if (messageId) {
+          setMessages((previous) =>
+            previous.map((message) => {
+              if (
+                message.id !== messageId
+              ) {
+                return message;
+              }
+
+              return {
+                ...message,
+                content:
+                  stoppedContent ||
+                  message.content ||
+                  "Generation stopped.",
+              };
+            }),
+          );
+        }
+
+        /*
+         * IMPORTANT:
+         *
+         * Do not remove the temporary
+         * user or assistant messages.
+         */
+        return;
+      }
 
       /*
        * -----------------------------------------
-       * REMOVE TEMPORARY MESSAGES
+       * HANDLE REAL ERRORS
        * -----------------------------------------
        */
+
+      console.error(
+        "Failed to send message:",
+        error,
+      );
+
+      /*
+       * Remove temporary messages
+       * only for real errors.
+       */
+
       setMessages((previous) =>
         previous.filter(
           (message) =>
             message.id !==
               temporaryMessageId &&
             message.id !==
-              streamingMessageId
-        )
+              streamingMessageId,
+        ),
       );
 
       await Swal.fire({
@@ -364,7 +551,30 @@ export default function ChatWindow() {
           "#111827",
       });
     } finally {
+      /*
+       * -----------------------------------------
+       * CLEANUP
+       * -----------------------------------------
+       */
+
       setSending(false);
+
+      abortControllerRef.current =
+        null;
+
+      /*
+       * IMPORTANT:
+       *
+       * Clear refs only AFTER the UI has
+       * received the captured stopped
+       * content.
+       */
+
+      streamingMessageIdRef.current =
+        null;
+
+      streamingContentRef.current =
+        "";
     }
   };
 
@@ -373,11 +583,12 @@ export default function ChatWindow() {
    * COPY MESSAGE
    * -----------------------------------------
    */
+
   const handleCopy = async (
-    content: string
+    content: string,
   ) => {
     await navigator.clipboard.writeText(
-      content
+      content,
     );
   };
 
@@ -386,12 +597,13 @@ export default function ChatWindow() {
    * EDIT MESSAGE
    * -----------------------------------------
    */
+
   const handleEdit = (
-    message: Message
+    message: Message,
   ) => {
     console.log(
       "Edit message:",
-      message
+      message,
     );
   };
 
@@ -400,14 +612,21 @@ export default function ChatWindow() {
    * REGENERATE RESPONSE
    * -----------------------------------------
    */
+
   const handleRegenerate = (
-    message: Message
+    message: Message,
   ) => {
     console.log(
       "Regenerate message:",
-      message
+      message,
     );
   };
+
+  /*
+   * -----------------------------------------
+   * CHECK MESSAGES
+   * -----------------------------------------
+   */
 
   const hasMessages =
     messages.length > 0;
@@ -417,6 +636,7 @@ export default function ChatWindow() {
    * UI
    * -----------------------------------------
    */
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
       {!hasMessages ? (
@@ -435,6 +655,7 @@ export default function ChatWindow() {
 
             <ChatInput
               onSend={handleSend}
+              onStop={handleStop}
               disabled={sending}
             />
           </div>
@@ -453,6 +674,7 @@ export default function ChatWindow() {
 
           <ChatInput
             onSend={handleSend}
+            onStop={handleStop}
             disabled={sending}
           />
         </>

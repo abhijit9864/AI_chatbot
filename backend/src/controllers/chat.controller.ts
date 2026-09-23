@@ -13,7 +13,7 @@ import {
 
 export async function createChatController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -38,7 +38,7 @@ export async function createChatController(
 
 export async function getChatsController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -63,7 +63,7 @@ export async function getChatsController(
 
 export async function getChatController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -74,10 +74,7 @@ export async function getChatController(
 
     const chatId = String(req.params.chatId);
 
-    const chat = await getChatById(
-      req.user.userId,
-      chatId
-    );
+    const chat = await getChatById(req.user.userId, chatId);
 
     if (!chat) {
       return res.status(404).json({
@@ -99,7 +96,7 @@ export async function getChatController(
 
 export async function renameChatController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -111,20 +108,14 @@ export async function renameChatController(
     const chatId = String(req.params.chatId);
     const { title } = req.body;
 
-    const chat = await renameChat(
-      req.user.userId,
-      chatId,
-      title
-    );
+    const chat = await renameChat(req.user.userId, chatId, title);
 
     return res.json({
       chat,
     });
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to rename chat";
+      error instanceof Error ? error.message : "Failed to rename chat";
 
     if (message === "Chat not found") {
       return res.status(404).json({
@@ -140,7 +131,7 @@ export async function renameChatController(
 
 export async function deleteChatController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -151,19 +142,14 @@ export async function deleteChatController(
 
     const chatId = String(req.params.chatId);
 
-    await deleteChat(
-      req.user.userId,
-      chatId
-    );
+    await deleteChat(req.user.userId, chatId);
 
     return res.json({
       message: "Chat deleted successfully",
     });
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to delete chat";
+      error instanceof Error ? error.message : "Failed to delete chat";
 
     if (message === "Chat not found") {
       return res.status(404).json({
@@ -179,7 +165,7 @@ export async function deleteChatController(
 
 export async function createMessageController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -187,6 +173,9 @@ export async function createMessageController(
         message: "Authentication required",
       });
     }
+
+    // AbortController will be used for explicit cancellation later.
+    const controller = new AbortController();
 
     const chatId = String(req.params.chatId);
     const { content } = req.body;
@@ -198,20 +187,9 @@ export async function createMessageController(
     }
 
     // Configure Server-Sent Events
-    res.setHeader(
-      "Content-Type",
-      "text/event-stream"
-    );
-
-    res.setHeader(
-      "Cache-Control",
-      "no-cache"
-    );
-
-    res.setHeader(
-      "Connection",
-      "keep-alive"
-    );
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
     res.flushHeaders();
 
@@ -219,8 +197,11 @@ export async function createMessageController(
     res.write(
       `data: ${JSON.stringify({
         type: "start",
-      })}\n\n`
+      })}\n\n`,
     );
+
+    console.log("[AI] Stream request started");
+    console.log("[AI] Sending request to Ollama...");
 
     // Stream Qwen3 response
     const result = await streamMessage(
@@ -232,9 +213,10 @@ export async function createMessageController(
           `data: ${JSON.stringify({
             type: "chunk",
             content: chunk,
-          })}\n\n`
+          })}\n\n`,
         );
-      }
+      },
+      controller.signal,
     );
 
     // Send final saved messages
@@ -243,16 +225,15 @@ export async function createMessageController(
         type: "done",
         userMessage: result.userMessage,
         assistantMessage: result.assistantMessage,
-      })}\n\n`
+      })}\n\n`,
     );
 
     res.end();
   } catch (error) {
-    console.error(
-      "Create message streaming error:",
-      error
-    );
+    console.error("Create message streaming error:", error);
 
+    // If headers have not been sent yet,
+    // return a normal HTTP error.
     if (!res.headersSent) {
       const message =
         error instanceof Error
@@ -272,15 +253,19 @@ export async function createMessageController(
 
     // If streaming has already started,
     // send an SSE error event.
-    res.write(
-      `data: ${JSON.stringify({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to create message",
-      })}\n\n`
-    );
+    try {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to create message",
+        })}\n\n`,
+      );
+    } catch (writeError) {
+      console.error("Failed to send SSE error:", writeError);
+    }
 
     res.end();
   }
@@ -288,7 +273,7 @@ export async function createMessageController(
 
 export async function getMessagesController(
   req: AuthenticatedRequest,
-  res: Response
+  res: Response,
 ) {
   try {
     if (!req.user) {
@@ -299,19 +284,14 @@ export async function getMessagesController(
 
     const chatId = String(req.params.chatId);
 
-    const messages = await getChatMessages(
-      req.user.userId,
-      chatId
-    );
+    const messages = await getChatMessages(req.user.userId, chatId);
 
     return res.json({
       messages,
     });
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to get messages";
+      error instanceof Error ? error.message : "Failed to get messages";
 
     if (message === "Chat not found") {
       return res.status(404).json({

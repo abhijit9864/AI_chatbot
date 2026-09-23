@@ -54,7 +54,8 @@ export async function getChatMessages(
 export async function sendMessageStream(
   chatId: string,
   content: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal
 ): Promise<{
   userMessage: Message;
   assistantMessage: Message;
@@ -84,6 +85,7 @@ export async function sendMessageStream(
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
+      signal,
       body: JSON.stringify({ content }),
     }
   );
@@ -164,11 +166,21 @@ export async function sendMessageStream(
       }
 
       if (data.type === "error") {
-        throw new Error(
-          data.message ||
-            "Streaming failed"
-        );
-      }
+  if (
+    signal?.aborted ||
+    data.message === "This operation was aborted"
+  ) {
+    throw new DOMException(
+      "The request was cancelled.",
+      "AbortError"
+    );
+  }
+
+  throw new Error(
+    data.message ||
+      "Streaming failed"
+  );
+}
     }
   }
 
