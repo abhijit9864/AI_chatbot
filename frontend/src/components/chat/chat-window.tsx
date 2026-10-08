@@ -16,6 +16,9 @@ import ChatInput from "./chat-input";
 import Swal from "sweetalert2";
 
 export default function ChatWindow() {
+  const messagesContainerRef =
+    useRef<HTMLDivElement | null>(null);
+
   const [user, setUser] = useState<User | null>(null);
 
   /*
@@ -78,6 +81,16 @@ export default function ChatWindow() {
       setUser(null);
     }
   }, []);
+
+  useEffect(() => {
+  const container = messagesContainerRef.current;
+
+  if (!container) {
+    return;
+  }
+
+  container.scrollTop = container.scrollHeight;
+}, [messages, sending]);
 
   /*
    * -----------------------------------------
@@ -662,15 +675,18 @@ export default function ChatWindow() {
         </div>
       ) : (
         <>
-          <MessageList
-            messages={messages}
-            isTyping={sending}
-            onCopy={handleCopy}
-            onEdit={handleEdit}
-            onRegenerate={
-              handleRegenerate
-            }
-          />
+          <div
+  ref={messagesContainerRef}
+  className="min-h-0 flex-1 overflow-y-auto"
+>
+  <MessageList
+    messages={messages}
+    isTyping={sending}
+    onCopy={handleCopy}
+    onEdit={handleEdit}
+    onRegenerate={handleRegenerate}
+  />
+</div>
 
           <ChatInput
             onSend={handleSend}

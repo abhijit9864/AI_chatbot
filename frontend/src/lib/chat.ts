@@ -55,7 +55,8 @@ export async function sendMessageStream(
   chatId: string,
   content: string,
   onChunk: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  model: string = "qwen3:4b-instruct"
 ): Promise<{
   userMessage: Message;
   assistantMessage: Message;
@@ -86,7 +87,10 @@ export async function sendMessageStream(
         Authorization: `Bearer ${token}`,
       },
       signal,
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+  content,
+  model,
+}),
     }
   );
 

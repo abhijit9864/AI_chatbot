@@ -37,15 +37,20 @@ export async function streamAIResponse(
   const prompt = `You are a helpful AI assistant.
 
 Rules:
-- Answer the user's question directly.
-- Be concise unless the user asks for detail.
+- Answer the user's question clearly and accurately.
+- Give a complete explanation, not just a short summary.
+- Provide enough detail for the user to understand the topic properly.
+- For technical questions, explain concepts step-by-step.
+- Use examples when they help understanding.
+- Use bullet points or numbered lists when appropriate.
+- If the user asks for a comparison, explain the differences clearly.
+- If the user asks "what is", explain the definition, purpose, how it works, and give a practical example.
+- If the user asks for code, provide working code and explain the important parts.
 - Follow the user's requested length or format.
 - Do not unnecessarily repeat information.
 - Do not reveal internal reasoning or thinking.
 - Return only the final answer.
 - Do not include <think> or </think> tags.
-
-/no_think
 
 Conversation:
 ${conversation}
