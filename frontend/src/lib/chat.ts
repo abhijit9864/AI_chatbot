@@ -55,16 +55,18 @@ export async function sendMessageStream(
   chatId: string,
   content: string,
   onChunk: (chunk: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onGenerationStart?: (generationId: string) => void,
 ): Promise<{
   userMessage: Message;
   assistantMessage: Message;
+  generationId: string;
 }> {
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   if (!API_URL) {
     throw new Error(
-      "NEXT_PUBLIC_API_URL is not configured"
+      "NEXT_PUBLIC_API_URL is not configured",
     );
   }
 
@@ -87,7 +89,7 @@ export async function sendMessageStream(
       },
       signal,
       body: JSON.stringify({ content }),
-    }
+    },
   );
 
   if (!response.ok) {
@@ -95,13 +97,13 @@ export async function sendMessageStream(
 
     throw new Error(
       errorText ||
-        `Request failed with status ${response.status}`
+        `Request failed with status ${response.status}`,
     );
   }
 
   if (!response.body) {
     throw new Error(
-      "Streaming response body is empty"
+      "Streaming response body is empty",
     );
   }
 
@@ -112,11 +114,11 @@ export async function sendMessageStream(
 
   let buffer = "";
 
-  let userMessage: Message | null =
-    null;
+  let userMessage: Message | null = null;
 
-  let assistantMessage: Message | null =
-    null;
+  let assistantMessage: Message | null = null;
+
+  let generationId: string | null = null;
 
   while (true) {
     const { value, done } =
@@ -138,7 +140,7 @@ export async function sendMessageStream(
       const line = event
         .split("\n")
         .find((line) =>
-          line.startsWith("data:")
+          line.startsWith("data:"),
         );
 
       if (!line) {
@@ -155,43 +157,105 @@ export async function sendMessageStream(
 
       const data = JSON.parse(json);
 
+      /*
+       * -----------------------------------------
+       * STREAM START
+       * -----------------------------------------
+       */
+
+      if (data.type === "start") {
+        generationId =
+          data.generationId;
+
+        if (generationId) {
+          console.log(
+            "[AI] Generation ID received:",
+            generationId,
+          );
+
+          // Immediately give the generation ID
+          // to ChatWindow while AI is still generating.
+          onGenerationStart?.(
+            generationId,
+          );
+        }
+      }
+
+      /*
+       * -----------------------------------------
+       * STREAM CHUNK
+       * -----------------------------------------
+       */
+
       if (data.type === "chunk") {
         onChunk(data.content);
       }
 
+      /*
+       * -----------------------------------------
+       * STREAM COMPLETE
+       * -----------------------------------------
+       */
+
       if (data.type === "done") {
-        userMessage = data.userMessage;
+        userMessage =
+          data.userMessage;
+
         assistantMessage =
           data.assistantMessage;
       }
 
-      if (data.type === "error") {
-  if (
-    signal?.aborted ||
-    data.message === "This operation was aborted"
-  ) {
-    throw new DOMException(
-      "The request was cancelled.",
-      "AbortError"
-    );
-  }
+      /*
+       * -----------------------------------------
+       * STREAM ERROR
+       * -----------------------------------------
+       */
 
-  throw new Error(
-    data.message ||
-      "Streaming failed"
-  );
-}
+      if (data.type === "error") {
+        if (
+          signal?.aborted ||
+          data.message ===
+            "This operation was aborted"
+        ) {
+          throw new DOMException(
+            "The request was cancelled.",
+            "AbortError",
+          );
+        }
+
+        throw new Error(
+          data.message ||
+            "Streaming failed",
+        );
+      }
     }
   }
 
-  if (!userMessage || !assistantMessage) {
+  /*
+   * -----------------------------------------
+   * VALIDATE FINAL RESPONSE
+   * -----------------------------------------
+   */
+
+  if (
+    !userMessage ||
+    !assistantMessage ||
+    !generationId
+  ) {
     throw new Error(
-      "Streaming completed without final messages"
+      "Streaming completed without final messages or generation ID",
     );
   }
+
+  /*
+   * -----------------------------------------
+   * RETURN RESULT
+   * -----------------------------------------
+   */
 
   return {
     userMessage,
     assistantMessage,
+    generationId,
   };
 }

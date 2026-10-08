@@ -11,6 +11,11 @@ import {
   getChatMessages,
 } from "../services/chat.service";
 
+import {
+  registerGeneration,
+  removeGeneration,
+} from "../services/generation.service";
+
 export async function createChatController(
   req: AuthenticatedRequest,
   res: Response,
@@ -167,6 +172,8 @@ export async function createMessageController(
   req: AuthenticatedRequest,
   res: Response,
 ) {
+  let generationId: string | undefined;
+
   try {
     if (!req.user) {
       return res.status(401).json({
@@ -174,13 +181,21 @@ export async function createMessageController(
       });
     }
 
-    // AbortController will be used for explicit cancellation later.
+    // Create a controller for this AI generation
     const controller = new AbortController();
+
+    // Create a unique ID for this generation
+    generationId = crypto.randomUUID();
+
+    // Register the generation so it can be cancelled later
+    registerGeneration(generationId, controller);
 
     const chatId = String(req.params.chatId);
     const { content } = req.body;
 
     if (!content || !content.trim()) {
+      removeGeneration(generationId);
+
       return res.status(400).json({
         message: "Message content is required",
       });
@@ -197,10 +212,12 @@ export async function createMessageController(
     res.write(
       `data: ${JSON.stringify({
         type: "start",
+        generationId,
       })}\n\n`,
     );
 
     console.log("[AI] Stream request started");
+    console.log("[AI] Generation ID:", generationId);
     console.log("[AI] Sending request to Ollama...");
 
     // Stream Qwen3 response
@@ -228,8 +245,18 @@ export async function createMessageController(
       })}\n\n`,
     );
 
+    // Remove completed generation from active generations
+    removeGeneration(generationId);
+
+    console.log("[AI] Generation removed:", generationId);
+
     res.end();
   } catch (error) {
+    // Remove generation from active generations
+    if (generationId) {
+      removeGeneration(generationId);
+    }
+
     console.error("Create message streaming error:", error);
 
     // If headers have not been sent yet,
@@ -269,7 +296,7 @@ export async function createMessageController(
 
     res.end();
   }
-}
+} 
 
 export async function getMessagesController(
   req: AuthenticatedRequest,

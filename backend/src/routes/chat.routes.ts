@@ -9,6 +9,7 @@ import {
   createMessageController,
   getMessagesController,
 } from "../controllers/chat.controller";
+import { stopGenerationController } from "../controllers/generation.controller";
 
 const router = Router();
 
@@ -40,6 +41,11 @@ router.post(
 router.get(
   "/:chatId/messages",
   getMessagesController
+);
+
+router.post(
+  "/generation/:generationId/stop",
+  stopGenerationController,
 );
 
 export default router;

@@ -27,6 +27,9 @@ export default function ChatWindow() {
   const abortControllerRef =
     useRef<AbortController | null>(null);
 
+  const generationIdRef =
+    useRef<string | null>(null);
+
   const streamingMessageIdRef =
     useRef<string | null>(null);
 
@@ -116,49 +119,125 @@ export default function ChatWindow() {
    * -----------------------------------------
    */
 
-  const handleStop = () => {
-    const messageId =
-      streamingMessageIdRef.current;
+  const handleStop = async () => {
+  const messageId =
+    streamingMessageIdRef.current;
 
-    /*
-     * VERY IMPORTANT:
-     *
-     * Capture the current content BEFORE
-     * aborting the request and BEFORE React
-     * gets another render.
-     */
-    const currentContent =
-      streamingContentRef.current;
+  /*
+   * Capture current streamed content
+   * before aborting anything.
+   */
+  const currentContent =
+    streamingContentRef.current;
 
-    /*
-     * Immediately preserve the partial
-     * response in the UI.
-     */
-    if (messageId) {
-      setMessages((previous) =>
-        previous.map((message) => {
-          if (message.id !== messageId) {
-            return message;
-          }
+  /*
+   * Immediately preserve partial response
+   * in the UI.
+   */
+  if (messageId) {
+    setMessages((previous) =>
+      previous.map((message) => {
+        if (message.id !== messageId) {
+          return message;
+        }
 
-          return {
-            ...message,
-            content:
-              currentContent ||
-              message.content ||
-              "Generation stopped.",
-          };
-        }),
+        return {
+          ...message,
+          content:
+            currentContent ||
+            message.content ||
+            "Generation stopped.",
+        };
+      }),
+    );
+  }
+
+  /*
+   * Get active generation ID.
+   */
+  const generationId =
+    generationIdRef.current;
+
+  /*
+   * Stop generation on backend.
+   */
+  if (generationId) {
+    try {
+      const API_URL =
+        process.env.NEXT_PUBLIC_API_URL;
+
+      const token =
+        localStorage.getItem("token");
+
+      if (!API_URL) {
+        console.error(
+          "NEXT_PUBLIC_API_URL is not configured",
+        );
+      } else if (!token) {
+        console.error(
+          "Authentication token not found",
+        );
+      } else {
+        console.log(
+          "[AI] Sending stop request:",
+          generationId,
+        );
+
+        const response =
+          await fetch(
+            `${API_URL}/chats/generation/${generationId}/stop`,
+            {
+              method: "POST",
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            },
+          );
+
+        if (!response.ok) {
+          const errorText =
+            await response.text();
+
+          console.error(
+            "[AI] Stop request failed:",
+            response.status,
+            errorText,
+          );
+        } else {
+          const data =
+            await response.json();
+
+          console.log(
+            "[AI] Backend stop response:",
+            data,
+          );
+        }
+      }
+    } catch (error) {
+      console.error(
+        "[AI] Failed to stop backend generation:",
+        error,
       );
     }
+  } else {
+    console.warn(
+      "[AI] No active generation ID found",
+    );
+  }
 
-    /*
-     * Now cancel the actual request.
-     */
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-  };
+  /*
+   * Abort frontend SSE request.
+   */
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
+
+  /*
+   * Clear generation ID.
+   */
+  generationIdRef.current = null;
+};
 
   /*
    * -----------------------------------------
@@ -196,7 +275,8 @@ export default function ChatWindow() {
       return;
     }
 
-    let activeChat = currentChat;
+    let activeChat =
+      currentChat;
 
     let temporaryMessageId:
       | string
@@ -211,6 +291,15 @@ export default function ChatWindow() {
 
       /*
        * -----------------------------------------
+       * RESET GENERATION ID
+       * -----------------------------------------
+       */
+
+      generationIdRef.current =
+        null;
+
+      /*
+       * -----------------------------------------
        * CREATE NEW CHAT
        * -----------------------------------------
        */
@@ -219,9 +308,12 @@ export default function ChatWindow() {
         const result =
           await createChat();
 
-        activeChat = result.chat;
+        activeChat =
+          result.chat;
 
-        setCurrentChat(activeChat);
+        setCurrentChat(
+          activeChat,
+        );
 
         setChats((previous) => [
           activeChat!,
@@ -245,7 +337,7 @@ export default function ChatWindow() {
 
       /*
        * -----------------------------------------
-       * CREATE TEMPORARY MESSAGE IDS
+       * CREATE TEMPORARY IDS
        * -----------------------------------------
        */
 
@@ -255,19 +347,11 @@ export default function ChatWindow() {
       streamingMessageId =
         crypto.randomUUID();
 
-      /*
-       * Store streaming message ID
-       * outside React state.
-       */
-
       streamingMessageIdRef.current =
         streamingMessageId;
 
-      /*
-       * Reset previous streamed content.
-       */
-
-      streamingContentRef.current = "";
+      streamingContentRef.current =
+        "";
 
       /*
        * -----------------------------------------
@@ -287,7 +371,7 @@ export default function ChatWindow() {
 
       /*
        * -----------------------------------------
-       * STREAMING ASSISTANT MESSAGE
+       * TEMPORARY ASSISTANT MESSAGE
        * -----------------------------------------
        */
 
@@ -302,7 +386,9 @@ export default function ChatWindow() {
       };
 
       /*
-       * Add temporary messages
+       * -----------------------------------------
+       * ADD TEMPORARY MESSAGES
+       * -----------------------------------------
        */
 
       setMessages((previous) => [
@@ -340,7 +426,9 @@ export default function ChatWindow() {
 
       if (isFirstMessage) {
         const newTitle =
-          generateChatTitle(content);
+          generateChatTitle(
+            content,
+          );
 
         try {
           const renameResult =
@@ -360,11 +448,12 @@ export default function ChatWindow() {
           );
 
           setChats((previous) =>
-            previous.map((chat) =>
-              chat.id ===
-              updatedChat.id
-                ? updatedChat
-                : chat,
+            previous.map(
+              (chat) =>
+                chat.id ===
+                updatedChat.id
+                  ? updatedChat
+                  : chat,
             ),
           );
         } catch (error) {
@@ -385,20 +474,18 @@ export default function ChatWindow() {
         await sendMessageStream(
           activeChat.id,
           content,
+
+          /*
+           * Chunk callback
+           */
+
           (chunk) => {
-            /*
-             * Save every streamed chunk
-             * outside React state.
-             */
             streamingContentRef.current +=
               chunk;
 
             const currentStreamingContent =
               streamingContentRef.current;
 
-            /*
-             * Update UI.
-             */
             setMessages((previous) =>
               previous.map(
                 (message) => {
@@ -418,7 +505,26 @@ export default function ChatWindow() {
               ),
             );
           },
+
+          /*
+           * Abort signal
+           */
+
           controller.signal,
+
+          /*
+           * Generation started callback
+           */
+
+          (generationId) => {
+            generationIdRef.current =
+              generationId;
+
+            console.log(
+              "[AI] Generation ID stored:",
+              generationId,
+            );
+          },
         );
 
       /*
@@ -468,15 +574,12 @@ export default function ChatWindow() {
 
       const isAbortError =
         error instanceof Error &&
-        error.name === "AbortError";
+        error.name ===
+          "AbortError";
 
       if (isAbortError) {
         /*
-         * Capture the content NOW.
-         *
-         * Do NOT read the ref inside the
-         * React updater because finally()
-         * will clear the ref.
+         * Preserve partial response.
          */
 
         const messageId =
@@ -487,30 +590,32 @@ export default function ChatWindow() {
 
         if (messageId) {
           setMessages((previous) =>
-            previous.map((message) => {
-              if (
-                message.id !== messageId
-              ) {
-                return message;
-              }
+            previous.map(
+              (message) => {
+                if (
+                  message.id !==
+                  messageId
+                ) {
+                  return message;
+                }
 
-              return {
-                ...message,
-                content:
-                  stoppedContent ||
-                  message.content ||
-                  "Generation stopped.",
-              };
-            }),
+                return {
+                  ...message,
+                  content:
+                    stoppedContent ||
+                    message.content ||
+                    "Generation stopped.",
+                };
+              },
+            ),
           );
         }
 
         /*
-         * IMPORTANT:
-         *
-         * Do not remove the temporary
-         * user or assistant messages.
+         * Do not remove temporary
+         * messages.
          */
+
         return;
       }
 
@@ -524,11 +629,6 @@ export default function ChatWindow() {
         "Failed to send message:",
         error,
       );
-
-      /*
-       * Remove temporary messages
-       * only for real errors.
-       */
 
       setMessages((previous) =>
         previous.filter(
@@ -562,13 +662,8 @@ export default function ChatWindow() {
       abortControllerRef.current =
         null;
 
-      /*
-       * IMPORTANT:
-       *
-       * Clear refs only AFTER the UI has
-       * received the captured stopped
-       * content.
-       */
+      generationIdRef.current =
+        null;
 
       streamingMessageIdRef.current =
         null;
@@ -645,7 +740,9 @@ export default function ChatWindow() {
             <div className="mb-8 text-center">
               <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
                 Hello,{" "}
-                {user?.name || "there"} 👋
+                {user?.name ||
+                  "there"}{" "}
+                👋
               </h1>
 
               <p className="mt-3 text-base text-gray-500">
